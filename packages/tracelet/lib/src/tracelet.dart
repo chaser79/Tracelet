@@ -1838,7 +1838,7 @@ class Tracelet {
   /// 2. **Dispatch callback** — the user-supplied [callback] that receives
   ///    each [HeadlessEvent].
   static Future<bool> registerHeadlessTask(
-    void Function(HeadlessEvent) callback,
+    FutureOr<void> Function(HeadlessEvent) callback,
   ) {
     // Headless isolates are not supported on web — bail out early.
     if (kIsWeb) return Future<bool>.value(false);
@@ -2949,8 +2949,14 @@ void _headlessCallbackDispatcher() {
 
       final headlessEvent = HeadlessEvent(name: name, event: eventMap);
 
-      // Invoke as void Function(HeadlessEvent).
-      (callback as void Function(HeadlessEvent))(headlessEvent);
+      // The registered callback may be sync (void) or async
+      // (Future<void>) — await it if it is, so this handler's own Future
+      // (which gates the platform-channel reply to native) doesn't
+      // complete until the callback's work genuinely has.
+      final dynamic result = Function.apply(callback, [headlessEvent]);
+      if (result is Future) {
+        await result;
+      }
     }
   });
 

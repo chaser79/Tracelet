@@ -1,0 +1,160 @@
+import Foundation
+
+/// Tracks plugin runtime state: enabled, tracking mode, odometer, motion state, etc.
+public final class StateManager {
+    private let defaults: UserDefaults
+    private let prefix = "com.tracelet.state."
+
+    public var enabled: Bool {
+        get { defaults.bool(forKey: prefix + "enabled") }
+        set { defaults.set(newValue, forKey: prefix + "enabled") }
+    }
+
+    /// The current tracking mode (continuous, geofences, periodic).
+    public var trackingMode: TraceletTrackingMode {
+        get { TraceletTrackingMode.fromInt(defaults.integer(forKey: prefix + "trackingMode")) }
+        set { defaults.set(newValue.rawValue, forKey: prefix + "trackingMode") }
+    }
+
+    public var schedulerEnabled: Bool {
+        get { defaults.bool(forKey: prefix + "schedulerEnabled") }
+        set { defaults.set(newValue, forKey: prefix + "schedulerEnabled") }
+    }
+
+    public var isMoving: Bool {
+        get { defaults.bool(forKey: prefix + "isMoving") }
+        set { defaults.set(newValue, forKey: prefix + "isMoving") }
+    }
+
+    public var odometer: Double {
+        get { defaults.double(forKey: prefix + "odometer") }
+        set { defaults.set(newValue, forKey: prefix + "odometer") }
+    }
+
+    public var didLaunchInBackground: Bool {
+        get { defaults.bool(forKey: prefix + "didLaunchInBackground") }
+        set { defaults.set(newValue, forKey: prefix + "didLaunchInBackground") }
+    }
+
+    public var lastLocationTime: Double {
+        get { defaults.double(forKey: prefix + "lastLocationTime") }
+        set { defaults.set(newValue, forKey: prefix + "lastLocationTime") }
+    }
+
+    /// Last periodic fix latitude (for odometer computation across app restarts).
+    /// Returns `NaN` when no periodic fix has been recorded.
+    public var lastPeriodicLatitude: Double {
+        get {
+            guard defaults.object(forKey: prefix + "lastPeriodicLatitude") != nil else {
+                return Double.nan
+            }
+            return defaults.double(forKey: prefix + "lastPeriodicLatitude")
+        }
+        set {
+            if newValue.isNaN {
+                defaults.removeObject(forKey: prefix + "lastPeriodicLatitude")
+            } else {
+                defaults.set(newValue, forKey: prefix + "lastPeriodicLatitude")
+            }
+        }
+    }
+
+    /// Last periodic fix longitude (for odometer computation across app restarts).
+    /// Returns `NaN` when no periodic fix has been recorded.
+    public var lastPeriodicLongitude: Double {
+        get {
+            guard defaults.object(forKey: prefix + "lastPeriodicLongitude") != nil else {
+                return Double.nan
+            }
+            return defaults.double(forKey: prefix + "lastPeriodicLongitude")
+        }
+        set {
+            if newValue.isNaN {
+                defaults.removeObject(forKey: prefix + "lastPeriodicLongitude")
+            } else {
+                defaults.set(newValue, forKey: prefix + "lastPeriodicLongitude")
+            }
+        }
+    }
+
+    public var speedMotionState: Int? {
+        get {
+            let key = prefix + "speedMotionState"
+            return defaults.object(forKey: key) as? Int
+        }
+        set {
+            if let val = newValue {
+                defaults.set(val, forKey: prefix + "speedMotionState")
+            } else {
+                defaults.removeObject(forKey: prefix + "speedMotionState")
+            }
+        }
+    }
+
+    public var speedLowCount: Int {
+        get { defaults.integer(forKey: prefix + "speedLowCount") }
+        set { defaults.set(newValue, forKey: prefix + "speedLowCount") }
+    }
+
+    public var speedWakeCount: Int {
+        get { defaults.integer(forKey: prefix + "speedWakeCount") }
+        set { defaults.set(newValue, forKey: prefix + "speedWakeCount") }
+    }
+
+    public var speedLastTransition: Double {
+        get { defaults.double(forKey: prefix + "speedLastTransition") }
+        set { defaults.set(newValue, forKey: prefix + "speedLastTransition") }
+    }
+
+    public init() {
+        defaults = UserDefaults.standard
+    }
+
+    /// Adds `distance` meters to the cumulative odometer.
+    public func addOdometer(distance: Double) {
+        odometer += distance
+    }
+
+    public func reset() {
+        enabled = false
+        trackingMode = .continuous
+        schedulerEnabled = false
+        isMoving = false
+        odometer = 0.0
+        didLaunchInBackground = false
+        lastLocationTime = 0
+        lastPeriodicLatitude = .nan
+        lastPeriodicLongitude = .nan
+    }
+
+    public func toMap(_ config: [String: Any]?) -> [String: Any] {
+        return [
+            "enabled": enabled,
+            "trackingMode": trackingMode.rawValue,
+            "schedulerEnabled": schedulerEnabled,
+            "isMoving": isMoving,
+            "odometer": odometer,
+            "didLaunchInBackground": didLaunchInBackground,
+            "lastLocationTime": lastLocationTime,
+            "config": config as Any,
+        ]
+    }
+
+    /// The shape `toMap` produces for an SDK that has not been made ready yet.
+    ///
+    /// Same keys, so a caller reading the map before `ready()` sees a disabled
+    /// state rather than a missing key (or, as it used to be, a trap — see
+    /// `TraceletSdk.getState()`).
+    public static func disabledStateMap() -> [String: Any] {
+        return [
+            "enabled": false,
+            "trackingMode": TraceletTrackingMode.continuous.rawValue,
+            "schedulerEnabled": false,
+            "isMoving": false,
+            "odometer": 0.0,
+            "didLaunchInBackground": false,
+            "lastLocationTime": 0.0,
+            "config": [String: Any]() as Any,
+        ]
+    }
+}

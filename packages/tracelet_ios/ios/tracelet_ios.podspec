@@ -18,11 +18,11 @@ execution for iOS.
   s.homepage         = 'https://github.com/Ikolvi/Tracelet'
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'Tracelet Contributors' => 'tracelet@example.com' }
-  s.source           = { :path => '.' }
+  s.source = { :http => 'https://github.com/Ikolvi/Tracelet/releases/download/tracelet_ios-v3.8.8/TraceletCore.xcframework.zip' }
   s.source_files = 'tracelet_ios/Sources/tracelet_ios/**/*.{swift,h}'
   s.public_header_files = 'tracelet_ios/Sources/tracelet_ios/**/*.h'
   s.dependency 'Flutter'
-  s.dependency 'TraceletSDK', '3.8.8'
+  s.vendored_frameworks = 'TraceletCore.xcframework'
   s.platform = :ios, '14.0'
   s.frameworks = 'CoreLocation', 'CoreMotion', 'UIKit', 'BackgroundTasks', 'AVFoundation', 'AudioToolbox', 'Network', 'DeviceCheck'
   s.libraries = 'sqlite3'

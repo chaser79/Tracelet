@@ -85,6 +85,18 @@ internal final class LiveActivityManager {
             return
         }
 
+        // Reconnect to an activity that survived a prior process (e.g. this
+        // app was force-quit and iOS has just relaunched it) instead of
+        // ending it and requesting a fresh one — a fresh request made
+        // during a background relaunch reliably fails ("Target is not
+        // foreground"), which used to leave the user with no Live Activity
+        // at all even though a perfectly good one was already on screen.
+        if let existing = Activity<TraceletActivityAttributes>.activities.first {
+            currentActivity = existing
+            updateOnMain(title: title, body: body, startedAt: startedAt, showTimer: showTimer)
+            return
+        }
+
         isStarting = true
         let requestGeneration = generation
 

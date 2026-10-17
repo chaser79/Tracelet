@@ -108,6 +108,7 @@ public final class TraceletSdk {
     public private(set) var preventSuspendManager: PreventSuspendManager!
     public private(set) var backgroundActivitySessionManager: BackgroundActivitySessionManager!
     public private(set) var serviceSessionManager: ServiceSessionManager!
+    public private(set) var terminationSafeguardManager: TerminationSafeguardManager!
     public private(set) var periodicRefreshScheduler: PeriodicRefreshScheduler!
 
     // MARK: - Rust Core subsystems
@@ -595,6 +596,7 @@ public final class TraceletSdk {
         startBehaviorSampling()
         preventSuspendManager.start()
         serviceSessionManager.start()
+        terminationSafeguardManager.start()
 
         eventSender.sendEnabledChange(true)
         logger.info("start() — tracking started")
@@ -848,6 +850,7 @@ public final class TraceletSdk {
             preventSuspendManager.stop()
             backgroundActivitySessionManager.stop()
             serviceSessionManager.stop()
+            terminationSafeguardManager.stop()
 
             scheduleManager.stop()
             tripManager.reset()
@@ -1366,6 +1369,7 @@ public final class TraceletSdk {
             preventSuspendManager.stop()
             backgroundActivitySessionManager.stop()
             serviceSessionManager.stop()
+            terminationSafeguardManager.stop()
 
             stateManager.reset()
             configManager.reset(config)
@@ -2843,6 +2847,7 @@ public final class TraceletSdk {
         preventSuspendManager = PreventSuspendManager(configManager: configManager)
         backgroundActivitySessionManager = BackgroundActivitySessionManager()
         serviceSessionManager = ServiceSessionManager()
+        terminationSafeguardManager = TerminationSafeguardManager()
         periodicRefreshScheduler = PeriodicRefreshScheduler()
         periodicRefreshScheduler.registerTask()
         periodicRefreshScheduler.onWakeUp = { [weak self] in

@@ -242,7 +242,14 @@ final class HeadlessRunner: HeadlessDispatching {
         stateLock.unlock()
 
         if let liveChannel = liveChannel {
-            liveChannel.invokeMethod("headlessEvent", arguments: event)
+            // Holds the process open until Dart's reply confirms the event was
+            // actually processed — invokeMethod's own reply, previously
+            // discarded, is now the completion signal instead of firing and
+            // hoping the isolate isn't suspended mid-write.
+            let taskId = BackgroundTaskHelper.shared.begin(taskName)
+            liveChannel.invokeMethod("headlessEvent", arguments: event) { _ in
+                BackgroundTaskHelper.shared.end(taskId)
+            }
             return
         }
 
@@ -370,6 +377,13 @@ final class HeadlessRunner: HeadlessDispatching {
             return
         }
 
+        // Give the headless callback access to plugins beyond the two
+        // hand-wired channels below (e.g. flutter_secure_storage, needed to
+        // read a refresh token from `registerHeadlessHeadersCallback`).
+        // `GeneratedPluginRegistrant` is app-generated, so it can only reach
+        // this engine via a host-supplied callback (`setPluginRegistrantCallback`).
+        TraceletIosPlugin.pluginRegistrantCallback?(newEngine)
+
         // Set up method channel for bidirectional communication
         let newChannel = FlutterMethodChannel(
             name: HeadlessRunner.channelName,
@@ -433,12 +447,22 @@ final class HeadlessRunner: HeadlessDispatching {
 
         TraceletLog.lifecycle("headless: engine ready — draining \(events.count) queued event(s)")
 
-        for event in events {
-            liveChannel?.invokeMethod("headlessEvent", arguments: event)
+        if events.isEmpty || liveChannel == nil {
+            BackgroundTaskHelper.shared.end(taskId)
+        } else {
+            // Keep the boot task alive until every drained event's Dart
+            // processing has actually replied, not just been fired.
+            let drainGroup = DispatchGroup()
+            for event in events {
+                drainGroup.enter()
+                liveChannel?.invokeMethod("headlessEvent", arguments: event) { _ in
+                    drainGroup.leave()
+                }
+            }
+            drainGroup.notify(queue: .main) {
+                BackgroundTaskHelper.shared.end(taskId)
+            }
         }
-
-        // Engine is up and events are dispatched — end the boot task.
-        BackgroundTaskHelper.shared.end(taskId)
     }
 
     /// Abandons an in-flight spawn that has outlived ``engineSpawnTimeout`` so

@@ -28,6 +28,17 @@ internal final class LiveActivityManager {
     /// Bumped on every stop; invalidates any start request still in flight.
     private var generation = 0
 
+    /// The latest refresh requested while a start was already in flight (and so
+    /// had nothing to update yet). `refreshLiveActivity` can race the internal
+    /// auto-resume `start(isResume:)` triggered by `ready()`: the resume starts
+    /// an activity with the config's static body, and the app's own refresh
+    /// (e.g. live stats) can land in the gap before that activity exists,
+    /// finding `isStarting == true` with no activity to update. Previously that
+    /// refresh was silently dropped and the activity was stuck on the stale
+    /// body until the next refresh happened to be called. Queuing it here and
+    /// applying it once the in-flight start completes closes that gap.
+    private var pendingRefresh: (title: String, body: String, startedAt: Date?, showTimer: Bool)?
+
     private init() {}
 
     // MARK: - Public API (safe to call from any thread)
@@ -69,6 +80,12 @@ internal final class LiveActivityManager {
                 self.updateOnMain(title: title, body: body, startedAt: startedAt, showTimer: showTimer)
             } else if !self.isStarting {
                 self.startOnMain(title: title, body: body, startedAt: startedAt, showTimer: showTimer)
+            } else {
+                // A start is already in flight (e.g. ready()'s internal
+                // auto-resume) and there's no activity yet to update. Remember
+                // this refresh so it's applied as soon as that start finishes,
+                // instead of being silently dropped.
+                self.pendingRefresh = (title, body, startedAt, showTimer)
             }
         }
     }
@@ -110,14 +127,26 @@ internal final class LiveActivityManager {
 
                 if self.generation != requestGeneration {
                     // stop() was called while the request was in flight.
+                    self.pendingRefresh = nil
                     TraceletLog.debug("[Tracelet-LiveActivity] Start superseded by stop; ending new activity.")
                     await activity.endImmediately()
                 } else {
                     self.currentActivity = activity
                     TraceletLog.debug("[Tracelet-LiveActivity] Live Activity started: \(activity.id)")
+
+                    if let pending = self.pendingRefresh {
+                        self.pendingRefresh = nil
+                        self.updateOnMain(
+                            title: pending.title,
+                            body: pending.body,
+                            startedAt: pending.startedAt,
+                            showTimer: pending.showTimer
+                        )
+                    }
                 }
             } catch {
                 self?.isStarting = false
+                self?.pendingRefresh = nil
                 TraceletLog.error("[Tracelet-LiveActivity] Failed to start Live Activity: \(error.localizedDescription)")
             }
         }

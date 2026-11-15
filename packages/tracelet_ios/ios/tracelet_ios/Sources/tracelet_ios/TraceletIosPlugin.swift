@@ -1,7 +1,7 @@
 import Flutter
 import UIKit
 #if canImport(TraceletSDK)
-import TraceletSDK
+
 #endif
 
 /// TraceletIosPlugin — Thin Flutter bridge that delegates all work to ``TraceletSdk``.
@@ -22,6 +22,32 @@ public class TraceletIosPlugin: NSObject, FlutterPlugin, DartSyncInterceptor {
     // If false, we immediately return the sentinel instead of waiting for a 
     // Dart timeout, preventing the sync from aborting when suspended.
     public static var hasCustomSyncBodyBuilder = false
+
+    /// Registrant callback the host app supplies so `HeadlessRunner`'s
+    /// on-demand `FlutterEngine` gets full plugin registration.
+    ///
+    /// `GeneratedPluginRegistrant` is generated per-app, so this package
+    /// cannot reference it directly — the host app must call
+    /// `setPluginRegistrantCallback` once (mirroring `workmanager_apple`'s
+    /// `WorkmanagerPlugin.setPluginRegistrantCallback`), e.g.:
+    /// ```swift
+    /// TraceletIosPlugin.setPluginRegistrantCallback { registry in
+    ///   GeneratedPluginRegistrant.register(with: registry)
+    /// }
+    /// ```
+    /// Without this, plugins used inside headless Dart callbacks (e.g.
+    /// `flutter_secure_storage`, needed to read a refresh token for
+    /// `registerHeadlessHeadersCallback`) throw `MissingPluginException` —
+    /// the headless engine's `binaryMessenger` has no native handlers
+    /// attached for anything beyond the two channels `HeadlessRunner` wires
+    /// by hand.
+    public static var pluginRegistrantCallback: ((FlutterPluginRegistry) -> Void)?
+
+    public static func setPluginRegistrantCallback(
+        _ callback: @escaping (FlutterPluginRegistry) -> Void
+    ) {
+        pluginRegistrantCallback = callback
+    }
 
     /// Reference to the primary (foreground) plugin instance.
     ///
@@ -204,20 +230,43 @@ public class TraceletIosPlugin: NSObject, FlutterPlugin, DartSyncInterceptor {
     // MARK: - DartSyncInterceptor
 
     public func requestTokenRefresh() -> Bool {
-        if TraceletIosPlugin.primaryInstance == nil && !headlessRunner.isRegistered() {
-            return false
+        if TraceletIosPlugin.primaryInstance == nil {
+            if !headlessRunner.isRegistered() { return false }
+            // Same headless callback layer as a headers refresh (post-401) —
+            // matches Android's HeadlessSyncInterceptor.requestTokenRefresh(),
+            // which routes here too. Without this branch, a killed-state 401
+            // fell through to `self.syncBodyChannel.invokeMethod` below with no
+            // live engine to answer it: the call just times out after
+            // dartCallbackTimeout and the token is never refreshed, so sync
+            // stays broken for the rest of the process once the access token
+            // expires.
+            TraceletSdk.shared.logger.debug("requestTokenRefresh: primary instance nil, routing to HeadlessRunner")
+            return headlessRunner.requestHeadersRefresh(timeout: TraceletIosPlugin.dartCallbackTimeout)
         }
         let semaphore = DispatchSemaphore(value: 0)
         var success = false
+        var noDartHandler = false
         DispatchQueue.main.async {
             self.syncBodyChannel.invokeMethod("requestTokenRefresh", arguments: nil) { result in
                 if let res = result as? Bool {
                     success = res
+                } else {
+                    noDartHandler = true
                 }
                 semaphore.signal()
             }
         }
         _ = semaphore.wait(timeout: .now() + TraceletIosPlugin.dartCallbackTimeout)
+        // A primary engine that never ran the app's Dart setup (e.g. a host
+        // app's plugin-registration-only engine created on a location
+        // relaunch) answers "not implemented" rather than a Bool. That is the
+        // killed-state case too, just with `primaryInstance` set, so it needs
+        // the same headless route. A timeout is deliberately excluded: the
+        // foreground callback may still be mid-refresh.
+        if noDartHandler && headlessRunner.isRegistered() {
+            TraceletSdk.shared.logger.debug("requestTokenRefresh: primary engine has no Dart handler, routing to HeadlessRunner")
+            return headlessRunner.requestHeadersRefresh(timeout: TraceletIosPlugin.dartCallbackTimeout)
+        }
         return success
     }
 
